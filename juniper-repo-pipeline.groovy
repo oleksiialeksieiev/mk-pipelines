@@ -30,10 +30,10 @@ node() {
         }
         lock("aptly-api") {
           stage("upload") {
+            workspace = common.getWorkspace()
             buildSteps = [:]
             debFiles = sh script: "basename -a ${BUILD_NUMBER}/${JC_VERSION}/*.deb", returnStdout: true
             for (file in debFiles.tokenize()) {
-              workspace = common.getWorkspace()
               def fh = new File((workspace+"/${BUILD_NUMBER}/${JC_VERSION}/"+file).trim())
               buildSteps[fh.name.split('_')[0]] = aptly.uploadPackageStep(
                   "${BUILD_NUMBER}/${JC_VERSION}/"+fh.name,
