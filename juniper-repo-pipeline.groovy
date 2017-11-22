@@ -35,12 +35,12 @@ def removePackage(server, repo, packagelist) {
 
 node('slave01') {
     try {
-        stage('Download paсkage') {
+        stage('Download package') {
             sh "mkdir -p ${BUILD_NUMBER}";
             sh "wget --trust-server-names -P ${BUILD_NUMBER}/ \"${PKG_URL}\"";
             pkgname = sh(script: "basename ${BUILD_NUMBER}/*.deb", returnStdout: true).trim()
         }
-        stage('Extract deb paсkage') {
+        stage('Extract deb package') {
             sh "dpkg-deb -x ${BUILD_NUMBER}/*.deb ${BUILD_NUMBER}/";
             sh "mkdir -p ${BUILD_NUMBER}/${JC_VERSION}";
             sh "tar xzf ${BUILD_NUMBER}/opt/contrail/contrail_packages/contrail_debs.tgz -C ${BUILD_NUMBER}/${JC_VERSION}";
