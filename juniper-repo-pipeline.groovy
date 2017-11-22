@@ -11,12 +11,29 @@
 **/
 def aptly = new com.mirantis.mk.Aptly()
 def common = new com.mirantis.mk.Common()
+def timestamp = common.getDatetime()
 
 def pkgname
 def debFiles
+def pkgFiles
 APTLY_REPO="ubuntu-${DIST}-${JC_VERSION}"
 
-node() {
+
+def removePackage(server, repo, packagelist) {
+    pkgFiles = sh script: "curl -s -f -X GET -H 'Content-Type: application/json'  ${server}/api/repos/${repo}/packages", returnStdout: true
+    for (file in pkgFiles.tokenize(",")) {
+        for (rmpkg in packagelist.tokenize(",")){
+            if (file.contains(" "+rmpkg+" ")){
+               pkgrtorem = file
+               echo("Package to item to remove: ${pkgrtorem}")
+               sh("curl -X DELETE -H 'Content-Type: application/json' --data '{\"PackageRefs\": [${pkgrtorem}]}'  ${server}/api/repos/${repo}/packages")
+            }
+        }
+    }
+}
+
+
+node('slave01') {
     try {
         stage('Download paсkage') {
             sh "mkdir -p ${BUILD_NUMBER}";
@@ -44,7 +61,10 @@ node() {
             }
            parallel buildSteps
         }
-          stage("publish") {
+        stage  ("remove extra packages"){
+          removePackage(APTLY_URL, APTLY_REPO, REMOVE_PACKAGES)
+        }
+         stage("publish") {
             aptly.snapshotRepo(APTLY_URL, APTLY_REPO, timestamp)
             aptly.publish(APTLY_URL)
           }
