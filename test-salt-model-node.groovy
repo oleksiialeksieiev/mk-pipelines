@@ -4,15 +4,16 @@
  *  DEFAULT_GIT_REF
  *  DEFAULT_GIT_URL
  *  CREDENTIALS_ID
- *  EXTRA_FORMULAS
  *  CLUSTER_NAME
  *  NODE_TARGET
  *  SYSTEM_GIT_URL
  *  SYSTEM_GIT_REF
- *  FORMULAS_SOURCE
+ *  DISTRIB_REVISION of apt mirrror to be used (http://mirror.mirantis.com/DISTRIB_REVISION/ by default)
  *  MAX_CPU_PER_JOB
  *  LEGACY_TEST_MODE
  *  RECLASS_IGNORE_CLASS_NOTFOUND
+ *  APT_REPOSITORY
+ *  APT_REPOSITORY_GPG
  */
 
 def common = new com.mirantis.mk.Common()
@@ -21,52 +22,73 @@ def git = new com.mirantis.mk.Git()
 def ssh = new com.mirantis.mk.Ssh()
 def saltModelTesting = new com.mirantis.mk.SaltModelTesting()
 
-def defaultGitRef = DEFAULT_GIT_REF
-def defaultGitUrl = DEFAULT_GIT_URL
+def defaultGitRef = env.DEFAULT_GIT_REF ?: null
+def defaultGitUrl = env.DEFAULT_GIT_URL ?: null
 
+def distribRevision = env.DISTRIB_REVISION ?: 'nightly'
 def checkouted = false
 
 throttle(['test-model']) {
-  node("python") {
-    try{
-      stage("checkout") {
-        if(defaultGitRef != "" && defaultGitUrl != "") {
-            checkouted = gerrit.gerritPatchsetCheckout(defaultGitUrl, defaultGitRef, "HEAD", CREDENTIALS_ID)
-        } else {
-          throw new Exception("Cannot checkout gerrit patchset, DEFAULT_GIT_URL or DEFAULT_GIT_REF is null")
-        }
-        if(checkouted) {
-          if (fileExists('classes/system')) {
-            if (SYSTEM_GIT_URL == "") {
-              ssh.prepareSshAgentKey(CREDENTIALS_ID)
-              dir('classes/system') {
-                remoteUrl = git.getGitRemote()
-                ssh.ensureKnownHosts(remoteUrl)
-              }
-              ssh.agentSh("git submodule init; git submodule sync; git submodule update --recursive")
-            } else {
-              dir('classes/system') {
-                if (!gerrit.gerritPatchsetCheckout(SYSTEM_GIT_URL, SYSTEM_GIT_REF, "HEAD", CREDENTIALS_ID)) {
-                  common.errorMsg("Failed to obtain system reclass with url: ${SYSTEM_GIT_URL} and ${SYSTEM_GIT_REF}")
+  timeout(time: 1, unit: 'HOURS') {
+    node("python&&docker") {
+      try{
+        stage("checkout") {
+          if(defaultGitRef != "" && defaultGitUrl != "") {
+              checkouted = gerrit.gerritPatchsetCheckout(defaultGitUrl, defaultGitRef, "HEAD", CREDENTIALS_ID)
+          } else {
+            throw new Exception("Cannot checkout gerrit patchset, DEFAULT_GIT_URL or DEFAULT_GIT_REF is null")
+          }
+          if(checkouted) {
+            if (fileExists('classes/system')) {
+              if (SYSTEM_GIT_URL == "") {
+                ssh.prepareSshAgentKey(CREDENTIALS_ID)
+                dir('classes/system') {
+                  remoteUrl = git.getGitRemote()
+                  ssh.ensureKnownHosts(remoteUrl)
+                }
+                ssh.agentSh("git submodule init; git submodule sync; git submodule update --recursive")
+              } else {
+                dir('classes/system') {
+                  if (!gerrit.gerritPatchsetCheckout(SYSTEM_GIT_URL, SYSTEM_GIT_REF, "HEAD", CREDENTIALS_ID)) {
+                    common.errorMsg("Failed to obtain system reclass with url: ${SYSTEM_GIT_URL} and ${SYSTEM_GIT_REF}")
+                  }
                 }
               }
             }
           }
         }
-      }
 
-      stage("test node") {
-        if (checkouted) {
-          def workspace = common.getWorkspace()
-          common.infoMsg("Running salt model test for node ${NODE_TARGET} in cluster ${CLUSTER_NAME}")
-          saltModelTesting.setupAndTestNode(NODE_TARGET, CLUSTER_NAME, EXTRA_FORMULAS, workspace, FORMULAS_SOURCE, FORMULAS_REVISION, MAX_CPU_PER_JOB.toInteger(), LEGACY_TEST_MODE, RECLASS_IGNORE_CLASS_NOTFOUND)
+        stage("test node") {
+          if (checkouted) {
+            def workspace = common.getWorkspace()
+            common.infoMsg("Running salt model test for node ${NODE_TARGET} in cluster ${CLUSTER_NAME}")
+
+            def DockerCName = "${env.JOB_NAME.toLowerCase()}_${env.BUILD_TAG.toLowerCase()}"
+            def dockerHostname = NODE_TARGET.tokenize('.')[0]
+            def domain = NODE_TARGET - "${dockerHostname}."
+            def config = [
+              'dockerHostname': dockerHostname,
+              'domain': domain,
+              'clusterName': CLUSTER_NAME,
+              'reclassEnv': workspace,
+              'distribRevision': distribRevision,
+              'dockerMaxCpus': MAX_CPU_PER_JOB.toInteger(),
+              'dockerExtraOpts': [ '--memory=3g' ],
+              'ignoreClassNotfound': RECLASS_IGNORE_CLASS_NOTFOUND,
+              'aptRepoUrl': APT_REPOSITORY,
+              'aptRepoGPG': APT_REPOSITORY_GPG,
+              'dockerContainerName': DockerCName,
+              'testContext': 'salt-model-node'
+            ]
+            saltModelTesting.testNode(config)
+          }
         }
+      } catch (Throwable e) {
+        // If there was an error or exception thrown, the build failed
+        currentBuild.result = "FAILURE"
+        currentBuild.description = currentBuild.description ? e.message + " " + currentBuild.description : e.message
+        throw e
       }
-    } catch (Throwable e) {
-       // If there was an error or exception thrown, the build failed
-       currentBuild.result = "FAILURE"
-       currentBuild.description = currentBuild.description ? e.message + " " + currentBuild.description : e.message
-       throw e
     }
   }
 }

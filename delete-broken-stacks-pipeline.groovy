@@ -15,33 +15,38 @@ common = new com.mirantis.mk.Common()
 git = new com.mirantis.mk.Git()
 openstack = new com.mirantis.mk.Openstack()
 salt = new com.mirantis.mk.Salt()
+timeout(time: 12, unit: 'HOURS') {
+    node {
 
-node {
+        // connection objects
+        def openstackCloud
+        // value defaults
+        def openstackVersion = OPENSTACK_API_CLIENT ? OPENSTACK_API_CLIENT : 'liberty'
+        def workspace = common.getWorkspace()
+        def openstackEnv = "${workspace}/venv"
 
-    // connection objects
-    def openstackCloud
-    // value defaults
-    def openstackVersion = OPENSTACK_API_CLIENT ? OPENSTACK_API_CLIENT : 'liberty'
-    def openstackEnv = "${env.WORKSPACE}/venv"
-
-    stage('Install OpenStack env') {
-        openstack.setupOpenstackVirtualenv(openstackEnv, openstackVersion)
-    }
-
-    stage('Connect to OpenStack cloud') {
-        openstackCloud = openstack.createOpenstackEnv(OPENSTACK_API_URL, OPENSTACK_API_CREDENTIALS, OPENSTACK_API_PROJECT)
-        openstack.getKeystoneToken(openstackCloud, openstackEnv)
-    }
-
-    stage('Delete broken Heat stacks') {
-        // get failed stacks
-        def brokenStacks = []
-        brokenStacks.addAll(openstack.getStacksWithStatus(openstackCloud, "CREATE_FAILED", openstackEnv))
-        brokenStacks.addAll(openstack.getStacksWithStatus(openstackCloud, "DELETE_FAILED", openstackEnv))
-        for(int i=0;i<brokenStacks.size();i++){
-            common.infoMsg("Deleting Heat stack " + brokenStacks[i])
-            openstack.deleteHeatStack(openstackCloud, brokenStacks[i], openstackEnv)
+        stage('Install OpenStack env') {
+            openstack.setupOpenstackVirtualenv(openstackEnv, openstackVersion)
         }
-    }
 
+
+        stage('Delete broken Heat stacks') {
+            def tenants = OPENSTACK_API_PROJECT.tokenize(",").collect{it.trim()}
+            for(tenant in tenants){
+                 common.infoMsg("Cleaning broken heat stacks in tenant ${tenant}")
+                 // connect to openstack
+                 openstackCloud = openstack.createOpenstackEnv(openstackEnv, OPENSTACK_API_URL, OPENSTACK_API_CREDENTIALS, tenant)
+                 openstack.getKeystoneToken(openstackCloud, openstackEnv)
+                 // get failed stacks
+                 def brokenStacks = []
+                 brokenStacks.addAll(openstack.getStacksWithStatus(openstackCloud, "CREATE_FAILED", openstackEnv))
+                 brokenStacks.addAll(openstack.getStacksWithStatus(openstackCloud, "DELETE_FAILED", openstackEnv))
+                 for(int i=0;i<brokenStacks.size();i++){
+                     common.infoMsg("Deleting Heat stack " + brokenStacks[i])
+                     openstack.deleteHeatStack(openstackCloud, brokenStacks[i], openstackEnv)
+                 }
+            }
+        }
+
+    }
 }
