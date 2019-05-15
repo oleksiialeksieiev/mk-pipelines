@@ -159,7 +159,7 @@ timeout(time: 1, unit: 'HOURS') {
                         } else {
                             writeFile file: 'gpgkey.asc', text: context['secrets_encryption_private_key']
                             sh "gpg --import gpgkey.asc"
-                            secretKeyID = sh(returnStdout: true, script: 'gpg --list-secret-keys --with-colons | awk -F: -e "/^sec/{print \\$5; exit}"').trim()
+                            secretKeyID = sh(returnStdout: true, script: 'gpg --list-secret-keys --with-colons | awk -F: "/^sec/{print \\$5; exit}"').trim()
                         }
                         context['secrets_encryption_key_id'] = secretKeyID
                     }
